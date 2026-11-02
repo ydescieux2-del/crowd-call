@@ -1,0 +1,114 @@
+{
+  "title": "The Midnight Heist",
+  "start": "entry",
+  "nodes": {
+    "entry": {
+      "q": "The vault is waiting. Way in?",
+      "options": [
+        {
+          "label": "Roof",
+          "next": "roof"
+        },
+        {
+          "label": "Front door",
+          "next": "front"
+        },
+        {
+          "label": "Tunnel",
+          "next": "tunnel"
+        }
+      ]
+    },
+    "roof": {
+      "q": "A laser grid guards the skylight.",
+      "options": [
+        {
+          "label": "Disable alarm",
+          "next": "quiet"
+        },
+        {
+          "label": "Cut the glass",
+          "next": "loud"
+        }
+      ]
+    },
+    "front": {
+      "q": "The guard wants your name.",
+      "options": [
+        {
+          "label": "Fake VIP",
+          "next": "quiet"
+        },
+        {
+          "label": "Cause a scene",
+          "next": "loud"
+        }
+      ]
+    },
+    "tunnel": {
+      "q": "The tunnel ends at a steel grate.",
+      "options": [
+        {
+          "label": "Pick the lock",
+          "next": "quiet"
+        },
+        {
+          "label": "Blast through",
+          "next": "loud"
+        }
+      ]
+    },
+    "quiet": {
+      "q": "Vault open. What's the exit plan?",
+      "options": [
+        {
+          "label": "Ghost out",
+          "next": "ghost"
+        },
+        {
+          "label": "Swap the loot",
+          "next": "decoy"
+        },
+        {
+          "label": "One more vault",
+          "next": "greedy"
+        }
+      ]
+    },
+    "loud": {
+      "q": "Sirens. One shot at getting out.",
+      "options": [
+        {
+          "label": "Speedboat",
+          "next": "boat"
+        },
+        {
+          "label": "Blend in",
+          "next": "crowd"
+        },
+        {
+          "label": "Rooftop leap",
+          "next": "caught"
+        }
+      ]
+    },
+    "ghost": {
+      "end": "Gone before dawn. The perfect heist."
+    },
+    "decoy": {
+      "end": "They chase a fake. You keep the fortune."
+    },
+    "greedy": {
+      "end": "One vault too many. Meet your new cellmate."
+    },
+    "boat": {
+      "end": "Spray, sirens, sunrise. You got away rich."
+    },
+    "crowd": {
+      "end": "Just another tourist. With a million in your bag."
+    },
+    "caught": {
+      "end": "Great leap. Bad landing. The cops applaud."
+    }
+  }
+}

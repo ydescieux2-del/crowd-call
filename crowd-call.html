@@ -28,6 +28,10 @@ h1 { margin: 0; font-size: 30px; line-height: 1.25; color: #f5f3ff; overflow-wra
 footer { display: flex; justify-content: space-between; gap: 16px; margin-top: 18px; font-size: 15px; line-height: 1.6; color: #c4bdd0; }
 #status::before { content: ''; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #a29aaf; margin-right: 7px; }#status.live::before { background: #4ade80; }
 #result { margin: 18px 0 0; color: #f5f3ff; font-size: 25px; font-weight: 800; overflow-wrap: anywhere; }#result:empty { display: none; }
+#story-meta { margin-bottom: 18px; color: #c4bdd0; font-size: 15px; line-height: 1.6; }
+#story-progress { color: #bf94ff; font-weight: 800; }
+#breadcrumb { overflow-wrap: anywhere; }
+.card.ending h1 { font-size: 36px; }
 #selftest { white-space: pre-wrap; font: 15px/1.6 monospace; color: #f5f3ff; margin-top: 16px; }
 @media (max-width: 783px) { .card { left: 16px; bottom: 16px; width: calc(100% - 32px); padding: 18px; } h1 { font-size: 25px; }.row { font-size: 18px; padding: 12px; gap: 8px; } .percent { min-width: 52px; } }
 @media (prefers-reduced-motion: reduce) { .fill, .card { transition: none; } }
@@ -36,6 +40,7 @@ footer { display: flex; justify-content: space-between; gap: 16px; margin-top: 1
 </head>
 <body>
 <main class="card" id="card">
+<div id="story-meta" hidden><div id="story-progress"></div><div id="breadcrumb"></div></div>
 <header><div><div class="eyebrow">CROWD CALL</div><h1 id="question"></h1></div><div class="clock" aria-label="Time remaining"><svg viewBox="0 0 72 72" aria-hidden="true"><circle class="track" cx="36" cy="36" r="31"/><circle class="progress" id="ring" cx="36" cy="36" r="31"/></svg><span id="seconds"></span></div></header>
 <div class="options" id="options"></div>
 <p id="result" role="status"></p>
@@ -64,6 +69,45 @@ function recordVote(votes, username, message, keys, active) {
   votes.set(username.toLowerCase(), key);
   return true;
 }
+const HEIST = {"title": "The Midnight Heist", "start": "entry", "nodes": {"entry": {"q": "The vault is waiting. Way in?", "options": [{"label": "Roof", "next": "roof"}, {"label": "Front door", "next": "front"}, {"label": "Tunnel", "next": "tunnel"}]}, "roof": {"q": "A laser grid guards the skylight.", "options": [{"label": "Disable alarm", "next": "quiet"}, {"label": "Cut the glass", "next": "loud"}]}, "front": {"q": "The guard wants your name.", "options": [{"label": "Fake VIP", "next": "quiet"}, {"label": "Cause a scene", "next": "loud"}]}, "tunnel": {"q": "The tunnel ends at a steel grate.", "options": [{"label": "Pick the lock", "next": "quiet"}, {"label": "Blast through", "next": "loud"}]}, "quiet": {"q": "Vault open. What's the exit plan?", "options": [{"label": "Ghost out", "next": "ghost"}, {"label": "Swap the loot", "next": "decoy"}, {"label": "One more vault", "next": "greedy"}]}, "loud": {"q": "Sirens. One shot at getting out.", "options": [{"label": "Speedboat", "next": "boat"}, {"label": "Blend in", "next": "crowd"}, {"label": "Rooftop leap", "next": "caught"}]}, "ghost": {"end": "Gone before dawn. The perfect heist."}, "decoy": {"end": "They chase a fake. You keep the fortune."}, "greedy": {"end": "One vault too many. Meet your new cellmate."}, "boat": {"end": "Spray, sirens, sunrise. You got away rich."}, "crowd": {"end": "Just another tourist. With a million in your bag."}, "caught": {"end": "Great leap. Bad landing. The cops applaud."}}};
+
+function validateStory(story) {
+  const object = value => value && typeof value === 'object' && !Array.isArray(value);
+  const text = value => typeof value === 'string' && value.trim().length > 0;
+  if (!object(story) || !text(story.title) || !text(story.start) || !object(story.nodes) || !Object.hasOwn(story.nodes, story.start)) throw new Error('Story needs title, start, and nodes.');
+  for (const node of Object.values(story.nodes)) {
+    if (!object(node)) throw new Error('Invalid story node.');
+    if (Object.hasOwn(node, 'end')) {
+      if (!text(node.end) || Object.hasOwn(node, 'options') || Object.hasOwn(node, 'q')) throw new Error('Ending needs only ending text.');
+    } else if (!text(node.q) || !Array.isArray(node.options) || node.options.length < 1 || node.options.length > 3 || node.options.some(option => !object(option) || !text(option.label) || !text(option.next) || !Object.hasOwn(story.nodes, option.next))) {
+      throw new Error('Decision needs a question and 1–3 labeled options pointing to existing nodes.');
+    }
+  }
+  // Finite stories make automatic completion and round progress predictable.
+  const visiting = new Set(), depths = new Map();
+  function depth(id) {
+    if (visiting.has(id)) throw new Error('Story cycles are not supported.');
+    if (depths.has(id)) return depths.get(id);
+    visiting.add(id);
+    const node = story.nodes[id];
+    const result = Object.hasOwn(node, 'end') ? 0 : 1 + Math.max(...node.options.map(option => depth(option.next)));
+    visiting.delete(id); depths.set(id, result); return result;
+  }
+  Object.keys(story.nodes).forEach(depth);
+  return { story, depths };
+}
+function chooseStoryWinner(counts, random = Math.random) {
+  const max = Math.max(...counts);
+  if (max === 0) return { index: 0, note: 'no votes, default pick' };
+  const tied = counts.map((count, index) => count === max ? index : -1).filter(index => index >= 0);
+  return { index: tied[Math.floor(random() * tied.length)], note: tied.length > 1 ? 'tie broken by coin flip' : '' };
+}
+function advanceStory(state, index, votes) {
+  const option = state.story.nodes[state.id].options[index];
+  state.path.push(option.label); state.id = option.next; state.round++;
+  votes.clear();
+}
+
 function runSelfTests() {
   let passed = 0;
   function check(condition, name) { if (!condition) throw new Error(name); passed++; }
@@ -80,21 +124,44 @@ function runSelfTests() {
   check(votes.size === 1 && votes.get('alice') === 'b', 'Later vote moves without duplication');
   check(!recordVote(votes, 'bob', '!c', ['a', 'b'], true), 'Unavailable option ignored');
   check(!recordVote(votes, 'alice', '!a', ['a', 'b'], false) && votes.get('alice') === 'b', 'Closed poll ignores votes');
+  check(validateStory(HEIST).depths.get(HEIST.start) === 3, 'Valid story and round depth');
+  function rejects(value) { try { validateStory(value); return false; } catch { return true; } }
+  check(rejects(null) && rejects({title:'Bad',start:'missing',nodes:{}}), 'Reject invalid story structure');
+  const broken = JSON.parse(JSON.stringify(HEIST)); broken.nodes.entry.options[0].next = 'missing';
+  check(rejects(broken), 'Reject dangling next node');
+  const cycle = JSON.parse(JSON.stringify(HEIST)); cycle.nodes.entry.options[0].next = 'entry';
+  check(rejects(cycle), 'Reject cycles');
+  const tooMany = JSON.parse(JSON.stringify(HEIST)); tooMany.nodes.entry.options.push(tooMany.nodes.entry.options[0]);
+  check(rejects(tooMany), 'Reject more than three options');
+  check(chooseStoryWinner([1,4,2]).index === 1, 'Select highest vote count');
+  check(chooseStoryWinner([2,2,0], () => 0).index === 0 && chooseStoryWinner([2,2,0], () => .99).index === 1 && chooseStoryWinner([2,2,0]).note === 'tie broken by coin flip', 'Random tie among leaders only');
+  check(chooseStoryWinner([0,0,0]).index === 0 && chooseStoryWinner([0,0]).note === 'no votes, default pick', 'No votes defaults to a');
+  const state = {story:HEIST,id:HEIST.start,path:[],round:1};
+  const roundVotes = new Map([['alice','b']]);
+  advanceStory(state, chooseStoryWinner([0,1,0]).index, roundVotes);
+  check(state.id === 'front' && state.path[0] === 'Front door' && state.round === 2, "Advance to winner's next node");
+  check(roundVotes.size === 0 && recordVote(roundVotes,'alice','!a',['a','b'],true), 'Reset votes and allow same chatter next round');
   return passed + ' self-tests passed';
 }
 const config = new URLSearchParams(location.search);
 const demo = config.get('demo') === '1';
 const testing = config.get('selftest') === '1';
 const channel = (config.get('channel') || '').replace(/^#/, '').toLowerCase();
-const durationValue = Number(config.get('t') || 60);
-const duration = Number.isFinite(durationValue) && durationValue > 0 ? durationValue : 60;
-const choices = [ ['a', config.get('a') || 'Option A'], ['b', config.get('b') || 'Option B'] ];
+const storySource = config.get('story');
+const defaultDuration = storySource ? 20 : 60;
+const durationValue = Number(config.get('t') || defaultDuration);
+const duration = Number.isFinite(durationValue) && durationValue > 0 ? durationValue : defaultDuration;
+let storyState = null, transitionTimer;
+let choices = [ ['a', config.get('a') || 'Option A'], ['b', config.get('b') || 'Option B'] ];
 if (config.get('c')?.trim()) choices.push(['c', config.get('c')]);
-const keys = choices.map(([key]) => key);
+let keys = choices.map(([key]) => key);
 const votes = new Map();
 const $ = id => document.getElementById(id);
 $('question').textContent = config.get('q') || 'What should we do next?';
-const rows = choices.map(([key, label]) => {
+let rows = [];
+function buildRows() {
+$('options').replaceChildren();
+rows = choices.map(([key, label]) => {
   const row = document.createElement('div'); row.className = 'option';
   const fill = document.createElement('div'); fill.className = 'fill';
   const content = document.createElement('div'); content.className = 'row';
@@ -103,6 +170,8 @@ const rows = choices.map(([key, label]) => {
   row.append(fill, content); $('options').append(row);
   return { row, fill, count: elements[2], percent: elements[3] };
 });
+}
+buildRows();
 function render() {
   const counts = keys.map(key => [...votes.values()].filter(vote => vote === key).length);
   rows.forEach((row, i) => {
@@ -116,11 +185,19 @@ let ended = false, socket, reconnectTimer, demoTimer, frame, disposed = false;
 const circumference = 2 * Math.PI * 31;
 $('ring').style.strokeDasharray = circumference;
 function status(text, live = false) { $('status').textContent = text; $('status').className = live ? 'live' : ''; }
-function cleanup() { disposed = true; clearTimeout(reconnectTimer); clearInterval(demoTimer); cancelAnimationFrame(frame); if (socket) socket.close(); }
+function cleanup() { disposed = true; clearTimeout(reconnectTimer); clearTimeout(transitionTimer); clearInterval(demoTimer); cancelAnimationFrame(frame); if (socket) socket.close(); }
 function finish() {
   if (ended) return;
   ended = true;
-  const counts = render(), max = Math.max(...counts);
+  const counts = render();
+  if (storyState) {
+    const winner = chooseStoryWinner(counts);
+    rows.forEach((row, index) => row.row.classList.toggle('winner', index === winner.index));
+    $('result').textContent = 'Chat chose: ' + choices[winner.index][1] + (winner.note ? ' · ' + winner.note : '');
+    transitionTimer = setTimeout(() => { advanceStory(storyState, winner.index, votes); showStoryNode(); }, 3000);
+    return;
+  }
+  const max = Math.max(...counts);
   const winners = choices.filter((_, i) => counts[i] === max);
   rows.forEach((row, i) => row.row.classList.toggle('winner', max > 0 && counts[i] === max));
   $('result').textContent = max === 0 ? 'No votes this round' : winners.length === 1 ? 'Chat picked: ' + winners[0][1] : 'Chat picked: Tie — ' + winners.map(([, label]) => label).join(' / ');
@@ -128,7 +205,7 @@ function finish() {
   setTimeout(() => $('card').classList.add('hidden'), 10000);
 }
 function accept(username, message) { if (recordVote(votes, username, message, keys, !ended && performance.now() < deadline)) render(); }
-const deadline = performance.now() + duration * 1000;
+let deadline = performance.now() + duration * 1000;
 function tick() {
   const remaining = Math.max(0, deadline - performance.now());
   $('seconds').textContent = Math.ceil(remaining / 1000);
@@ -166,16 +243,63 @@ if (testing) {
   try { $('selftest').textContent = runSelfTests(); document.documentElement.dataset.selftest = 'passed'; }
   catch (error) { $('selftest').textContent = 'FAIL: ' + error.message; document.documentElement.dataset.selftest = 'failed'; console.error(error); }
 }
-if (!demo && !testing && !/^[a-z0-9_]{1,25}$/.test(channel)) {
-  status('Add a valid ?channel=yourchannel to the URL'); $('seconds').textContent = '—';
-} else if (testing && !demo) { status('Offline parser self-test'); $('seconds').textContent = '—'; }
-else {
-  tick();
+function showStoryNode() {
+  const node = storyState.story.nodes[storyState.id];
+  $('story-meta').hidden = false;
+  $('breadcrumb').textContent = storyState.path.join(' > ') || 'Your plan starts here';
+  $('result').textContent = '';
+  $('question').textContent = node.end || node.q;
+  document.documentElement.dataset.storyNode = storyState.id;
+  if (Object.hasOwn(node, 'end')) {
+    ended = true; cleanup();
+    $('card').classList.add('ending');
+    $('options').replaceChildren();
+    document.querySelector('.clock').hidden = true;
+    $('story-progress').textContent = storyState.story.title + ' · Complete';
+    $('total').textContent = 'Full path above'; status('Story complete');
+    document.documentElement.dataset.storyComplete = 'true';
+    return;
+  }
+  $('story-progress').textContent = storyState.story.title + ' · Round ' + storyState.round + ' of ' + (storyState.round - 1 + storyState.depths.get(storyState.id));
+  choices = node.options.map((option, index) => ['abc'[index], option.label]);
+  keys = choices.map(([key]) => key);
+  buildRows(); render(); ended = false;
+  deadline = performance.now() + duration * 1000; tick();
+}
+async function start() {
+  if (testing && !demo) { status('Offline parser and story self-test'); $('seconds').textContent = '—'; return; }
+  if (!demo && !/^[a-z0-9_]{1,25}$/.test(channel)) {
+    status('Add a valid ?channel=yourchannel to the URL'); $('seconds').textContent = '—'; return;
+  }
+  if (storySource) {
+    status('Loading story…'); $('seconds').textContent = '—';
+    try {
+      let data;
+      if (storySource === 'heist') data = HEIST;
+      else {
+        const url = new URL(storySource, location.href);
+        if (!['http:', 'https:'].includes(url.protocol)) throw new Error('Use an HTTP(S) story URL or story=heist.');
+        const response = await fetch(url.href, { signal: AbortSignal.timeout(15000) });
+        if (!response.ok) throw new Error('Story request failed (' + response.status + ').');
+        data = await response.json();
+      }
+      if (disposed) return;
+      storyState = { ...validateStory(data), id: data.start, path: [], round: 1 };
+      showStoryNode();
+    } catch (error) {
+      if (disposed) return;
+      ended = true; $('question').textContent = 'Could not load story';
+      $('options').replaceChildren(); $('total').textContent = '';
+      status('Story error: ' + error.message); return;
+    }
+  } else tick();
+  if (disposed) return; // A story may start directly at an ending.
   if (demo) {
     status('Demo · simulated chat', true);
     demoTimer = setInterval(() => accept('viewer' + Math.floor(Math.random() * 80), '!' + keys[Math.floor(Math.random() * keys.length)]), 180);
   } else connect();
 }
+start();
 window.addEventListener('pagehide', cleanup);
 </script>
 </body>
